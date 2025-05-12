@@ -83,6 +83,9 @@ services:
     user: ${UID}:${GID}
     volumes:
       - /data/ringbuffer:/data/ringbuffer
+    command:
+      - "--drf_sink.channel_dir"
+      - ${CHANNEL_DIR:-test}
 
 volumes:
     mongodb:
