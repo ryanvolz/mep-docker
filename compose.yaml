@@ -71,11 +71,10 @@ services:
       - HOLOSCAN_LOG_LEVEL=INFO
       - HOLOSCAN_LOG_FORMAT=DEFAULT
     networks:
+      - default
       - rfsoc_10GbE
     ports:
       - 60133:60133/udp
-    profiles:
-      - recording
     restart: unless-stopped
     runtime: nvidia
     tmpfs:
@@ -83,9 +82,6 @@ services:
     user: ${UID}:${GID}
     volumes:
       - /data/ringbuffer:/data/ringbuffer
-    command:
-      - "--drf_sink.channel_dir"
-      - ${CHANNEL_DIR:-test}
 
 volumes:
     mongodb:

@@ -24,6 +24,9 @@ WORKDIR /app
 #
 ARG DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && apt-get install -y --no-install-recommends \
+    iproute2 \
+    iputils-ping \
+    net-tools \
     python3-pip \
     && rm -rf /var/lib/apt/lists/* \
     && apt-get clean
@@ -31,7 +34,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 #
 # Install Python dependencies not covered by deb packages
 #
-RUN python3 -m pip install --no-cache-dir digital-rf jsonargparse[ruyaml,signatures]
+RUN python3 -m pip install --no-cache-dir aiomqtt anyio digital-rf jsonargparse[ruyaml,signatures]
 
 #
 # Set up environment variables
@@ -40,9 +43,9 @@ ENV HOLOSCAN_EXECUTOR_LOG_LEVEL=WARN
 ENV HOLOSCAN_LOG_LEVEL=INFO
 ENV HOLOSCAN_LOG_FORMAT=DEFAULT
 
-COPY --chmod=775 entrypoint.bash /entrypoint.bash
 COPY --chmod=666 configs /app/configs
+COPY --chmod=775 recorder_service.py /app/recorder_service.py
 COPY --chmod=777 sdr_mep_recorder.py /app/sdr_mep_recorder.py
 
 WORKDIR /ramdisk
-ENTRYPOINT ["/bin/bash", "/entrypoint.bash"]
+ENTRYPOINT ["python3", "/app/recorder_service.py"]
