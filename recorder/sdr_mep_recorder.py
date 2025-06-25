@@ -25,8 +25,12 @@ import tempfile
 import typing
 
 import cupy as cp
+import cupyx.scipy.signal as cpss
 import holoscan
 import jsonargparse
+import matplotlib as mpl
+import matplotlib.pyplot as plt
+import numpy as np
 from holohub import basic_network, rf_array
 from holohub.rf_array.digital_metadata import DigitalMetadataSink
 from holohub.rf_array.params import (
@@ -159,13 +163,26 @@ def build_config_parser():
 
 
 class Spectrogram(holoscan.core.Operator):
+    window: str
     reduce_op: str
+    chunk_size: int
+    num_subchannels: int
 
     def __init__(
         self,
         fragment,
+        chunk_size,
+        num_subchannels,
         *args,
+        window="hann",
+        nperseg=1024,
+        noverlap=None,
+        nfft=None,
+        detrend=False,
         reduce_op="max",
+        num_chunks_per_plot=600,
+        col_wrap=3,
+        cmap="viridis",
         **kwargs,
     ):
         """Operator that computes spectrograms from RF data.
@@ -180,15 +197,75 @@ class Spectrogram(holoscan.core.Operator):
         fragment : Fragment
             The fragment that the operator belongs to.
         """
-        self.reduce_op = reduce_op
+        self.chunk_size = chunk_size
+        self.num_subchannels = num_subchannels
+        self.window = window
+        self.nperseg = nperseg
+        if noverlap is None:
+            noverlap = nperseg // 2
+        self.noverlap = noverlap
+        if nfft is None:
+            nfft = nperseg
+        self.nfft = nfft
+        self.detrend = detrend
+        if reduce_op == "max":
+            self.reduce_op = cp.amax
+        elif reduce_op == "median":
+            self.reduce_op = cp.median
+        else:
+            self.reduce_op = cp.mean
+        self.num_chunks_per_plot = num_chunks_per_plot
+        self.col_wrap = col_wrap
+        self.cmap = cmap
 
         super().__init__(fragment, *args, **kwargs)
         self.logger = logging.getLogger("Spectrogram")
 
     def setup(self, spec: holoscan.core.OperatorSpec):
         spec.input("rf_in").connector(
-            holoscan.core.IOSpec.ConnectorType.DOUBLE_BUFFER, capacity=100
+            holoscan.core.IOSpec.ConnectorType.DOUBLE_BUFFER,
+            capacity=100,
         )
+
+    def create_spec_figure(self):
+        # FIXME: set backend
+        ncols = min(self.col_wrap, self.num_subchannels)
+        nrows = int(np.ceil(self.num_subchannels / self.col_wrap))
+        fig, axs = plt.subplots(
+            nrows,
+            ncols,
+            sharex=True,
+            sharey=True,
+            squeeze=False,
+            layout="compressed",
+            figsize=self.figsize,
+            dpi=self.dpi,
+        )
+        self.fill_data = np.zeros(
+            (self.nfft, self.num_chunks_per_plot),
+            dtype=np.float32,
+        )
+        self.norm = mpl.colors.Normalize(vmin=0, vmax=40)
+        axs_1d = []
+        imgs = []
+        for sch in range(self.num_subchannels):
+            row_idx = sch // self.col_wrap
+            col_idx = sch % self.col_wrap
+            ax = axs[row_idx, col_idx]
+            img = ax.imshow(
+                self.fill_data,
+                cmap=self.cmap,
+                norm=self.norm,
+                aspect="auto",
+                interpolation="none",
+                origin="lower",
+            )
+            imgs.append(img)
+            axs_1d.append(ax)
+
+        self.fig = fig
+        self.axs = axs_1d
+        self.imgs = img
 
     def initialize(self):
         self.logger.debug("Initializing spectrogram operator")
@@ -202,6 +279,33 @@ class Spectrogram(holoscan.core.Operator):
         rf_array = op_input.receive("rf_in")
         rf_data = cp.from_dlpack(rf_array.data)
         rf_metadata = rf_array.metadata
+        with cp.cuda.ExternalStream(rf_array.stream):
+            freqs, ts, Zxx = cpss.stft(
+                rf_data,
+                fs=rf_metadata.sample_rate_numerator
+                / rf_metadata.sample_rate_denominator,
+                window=self.window,
+                nperseg=self.nperseg,
+                noverlap=self.noverlap,
+                nfft=self.nfft,
+                detrend=self.detrend,
+                boundary=None,
+                padded=True,
+                axis=0,
+                scaling="psd",
+            )
+            # reduce over time axis
+            spec = self.reduce_op(Zxx, axis=-1)
+            centered_freqs = freqs + rf_metadata.center_freq
+
+        if False:
+            # update self.norm.vmin, self.norm.vmax?
+            for sch in range(self.num_subchannels):
+                self.imgs[sch].set(
+                    data=spec[:, sch],
+                    extent=(0, 1, 0, 1),
+                )
+                self.fig.canvas.draw()
 
         self.logger.info(f"{rf_metadata.sample_idx}: {rf_data}")
 
@@ -327,6 +431,7 @@ class App(holoscan.core.Application):
         spectrogram = Spectrogram(
             self,
             name="spectrogram",
+            **add_chunk_kwargs(last_chunk_shape, **self.kwargs("spectrogram")),
         )
         self.add_flow(last_op, spectrogram)
 
