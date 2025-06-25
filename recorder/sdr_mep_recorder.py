@@ -24,6 +24,7 @@ import sys
 import tempfile
 import typing
 
+import cupy as cp
 import holoscan
 import jsonargparse
 from holohub import basic_network, rf_array
@@ -157,6 +158,54 @@ def build_config_parser():
     return parser
 
 
+class Spectrogram(holoscan.core.Operator):
+    reduce_op: str
+
+    def __init__(
+        self,
+        fragment,
+        *args,
+        reduce_op="max",
+        **kwargs,
+    ):
+        """Operator that computes spectrograms from RF data.
+
+        **==Named Inputs==**
+
+            rf_in : RFArray
+                RFArray, including metadata.
+
+        Parameters
+        ----------
+        fragment : Fragment
+            The fragment that the operator belongs to.
+        """
+        self.reduce_op = reduce_op
+
+        super().__init__(fragment, *args, **kwargs)
+        self.logger = logging.getLogger("Spectrogram")
+
+    def setup(self, spec: holoscan.core.OperatorSpec):
+        spec.input("rf_in").connector(
+            holoscan.core.IOSpec.ConnectorType.DOUBLE_BUFFER, capacity=100
+        )
+
+    def initialize(self):
+        self.logger.debug("Initializing spectrogram operator")
+
+    def compute(
+        self,
+        op_input: holoscan.core.InputContext,
+        op_output: holoscan.core.OutputContext,
+        context: holoscan.core.ExecutionContext,
+    ):
+        rf_array = op_input.receive("rf_in")
+        rf_data = cp.from_dlpack(rf_array.data)
+        rf_metadata = rf_array.metadata
+
+        self.logger.info(f"{rf_metadata.sample_idx}: {rf_data}")
+
+
 class App(holoscan.core.Application):
     def compose(self):
         basic_net_rx = basic_network.BasicNetworkOpRx(
@@ -274,6 +323,12 @@ class App(holoscan.core.Application):
             metadata=self.kwargs("metadata"),
         )
         self.add_flow(last_op, dmd_sink)
+
+        spectrogram = Spectrogram(
+            self,
+            name="spectrogram",
+        )
+        self.add_flow(last_op, spectrogram)
 
 
 def main():
