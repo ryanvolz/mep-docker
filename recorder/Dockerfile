@@ -48,5 +48,6 @@ COPY --chmod=666 configs /app/configs
 COPY --chmod=775 recorder_service.py /app/recorder_service.py
 COPY --chmod=777 sdr_mep_recorder.py /app/sdr_mep_recorder.py
 
+ENV HOME=/ramdisk
 WORKDIR /ramdisk
 ENTRYPOINT ["python3", "/app/recorder_service.py"]
