@@ -271,7 +271,7 @@ class Spectrogram(holoscan.core.Operator):
             dtype=np.float32,
         )
         self.spec_host_data[...] = self.fill_data
-        self.norm = mpl.colors.Normalize(vmin=0, vmax=40)
+        self.norm = mpl.colors.Normalize(vmin=None, vmax=None)
         axs_1d = []
         imgs = []
         for sch in range(self.num_subchannels):
@@ -296,6 +296,8 @@ class Spectrogram(holoscan.core.Operator):
     def initialize(self):
         self.logger.debug("Initializing spectrogram operator")
         self.create_spec_figure()
+        self.prior_metadata = None
+        self.freq_idx = None
 
     def compute(
         self,
@@ -306,6 +308,18 @@ class Spectrogram(holoscan.core.Operator):
         rf_array = op_input.receive("rf_in")
         rf_data = cp.from_dlpack(rf_array.data)
         rf_metadata = rf_array.metadata
+
+        if self.prior_metadata is None:
+            self.prior_metadata = rf_metadata
+            self.freq_idx = np.fft.fftshift(
+                np.fft.fftfreq(
+                    self.nfft,
+                    rf_metadata.sample_rate_denominator
+                    / rf_metadata.sample_rate_numerator,
+                )
+            )
+        if self.prior_metadata != rf_metadata:
+            self.logger.info("rf_metadata does not match prior")
 
         chunk_plot_idx = (
             rf_metadata.sample_idx // self.chunk_size
@@ -334,7 +348,9 @@ class Spectrogram(holoscan.core.Operator):
                 scaling="spectrum",
             )
             # reduce over time axis
-            spec = self.reduce_op(Zxx.real**2 + Zxx.imag**2, axis=-1)
+            spec = cp.fft.fftshift(
+                self.reduce_op(Zxx.real**2 + Zxx.imag**2, axis=-1), axes=0
+            )
 
             cp.asnumpy(
                 spec, out=self.spec_host_data[..., chunk_plot_idx], blocking=False
