@@ -293,7 +293,7 @@ class Spectrogram(holoscan.core.Operator):
 
         self.fig = fig
         self.axs = axs_1d
-        self.imgs = img
+        self.imgs = imgs
 
     def initialize(self):
         self.logger.debug("Initializing spectrogram operator")
@@ -369,18 +369,14 @@ class Spectrogram(holoscan.core.Operator):
             )
 
         if chunk_plot_idx == (self.num_chunks_per_plot - 1):
-            msg = (
-                "Saving spectrogram figure after chunk with sample_idx"
-                f" {rf_metadata.sample_idx}"
-            )
-            self.logger.debug(msg)
-
             plot_start_dt = drf.util.sample_to_datetime(
                 rf_metadata.sample_idx
                 - self.chunk_size * (self.num_chunks_per_plot - 1),
                 np.longdouble(rf_metadata.sample_rate_numerator)
                 / rf_metadata.sample_rate_denominator,
             )
+
+            self.logger.info(f"Saving spectrogram figure for time {plot_start_dt}")
 
             spec_power_db = 10 * np.log10(self.spec_host_data)
             # update self.norm.vmin, self.norm.vmax?
