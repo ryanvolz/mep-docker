@@ -279,7 +279,7 @@ class Spectrogram(holoscan.core.Operator):
             col_idx = sch % self.col_wrap
             ax = axs[row_idx, col_idx]
             img = ax.imshow(
-                self.fill_data,
+                self.spec_host_data[:, sch, :],
                 cmap=self.cmap,
                 norm=self.norm,
                 aspect="auto",
