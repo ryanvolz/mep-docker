@@ -264,11 +264,13 @@ class Spectrogram(holoscan.core.Operator):
         self.spec_host_data = cupyx.zeros_pinned(
             (self.nfft, self.num_subchannels, self.num_chunks_per_plot),
             dtype=np.float32,
+            order="F",
         )
         self.fill_data = np.full(
             (self.nfft, self.num_subchannels, self.num_chunks_per_plot),
             np.nan,
             dtype=np.float32,
+            order="F",
         )
         self.spec_host_data[...] = self.fill_data
         self.norm = mpl.colors.Normalize(vmin=None, vmax=None)
