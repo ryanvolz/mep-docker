@@ -320,7 +320,17 @@ class Spectrogram(holoscan.core.Operator):
                     / rf_metadata.sample_rate_numerator,
                 )
             )
-        if self.prior_metadata != rf_metadata:
+        if (
+            (
+                self.prior_metadata.sample_rate_numerator
+                != rf_metadata.sample_rate_numerator
+            )
+            or (
+                self.prior_metadata.sample_rate_denominator
+                != rf_metadata.sample_rate_denominator
+            )
+            or (self.prior_metadata.center_freq != rf_metadata.center_freq)
+        ):
             self.logger.info("rf_metadata does not match prior")
 
         chunk_plot_idx = (
@@ -365,7 +375,7 @@ class Spectrogram(holoscan.core.Operator):
             )
             self.logger.debug(msg)
 
-            plot_start_dt = drf.sample_to_datetime(
+            plot_start_dt = drf.util.sample_to_datetime(
                 rf_metadata.sample_idx
                 - self.chunk_size * (self.num_chunks_per_plot - 1),
                 np.longdouble(rf_metadata.sample_rate_numerator)
