@@ -25,6 +25,7 @@ import tempfile
 import typing
 
 import cupy as cp
+import cupyx
 import cupyx.scipy.signal as cpss
 import holoscan
 import jsonargparse
@@ -42,6 +43,8 @@ from holohub.rf_array.params import (
     add_chunk_kwargs,
 )
 from jsonargparse.typing import NonNegativeInt, PositiveInt
+
+mpl.use("agg")
 
 logger = logging.getLogger("sdr_mep_recorder.py")
 
@@ -92,6 +95,14 @@ class BasicNetworkOperatorParams:
     "Number of packets in batch"
     max_payload_size: PositiveInt = 8256
     "Maximum payload size expected from sender"
+
+
+@dataclasses.dataclass
+class SpectrogramParams:
+    """Spectrogram parameters"""
+
+    cmap: str = "viridis"
+    """Colormap"""
 
 
 @dataclasses.dataclass
@@ -158,6 +169,7 @@ def build_config_parser():
     parser.add_argument(
         "--metadata", type=typing.Optional[dict[str, typing.Any]], default=None
     )
+    parser.add_argument("--spectrogram", type=SpectrogramParams)
 
     return parser
 
@@ -180,7 +192,7 @@ class Spectrogram(holoscan.core.Operator):
         nfft=None,
         detrend=False,
         reduce_op="max",
-        num_chunks_per_plot=600,
+        num_chunks_per_plot=300,
         col_wrap=3,
         cmap="viridis",
         **kwargs,
@@ -228,7 +240,6 @@ class Spectrogram(holoscan.core.Operator):
         )
 
     def create_spec_figure(self):
-        # FIXME: set backend
         ncols = min(self.col_wrap, self.num_subchannels)
         nrows = int(np.ceil(self.num_subchannels / self.col_wrap))
         fig, axs = plt.subplots(
@@ -241,10 +252,16 @@ class Spectrogram(holoscan.core.Operator):
             figsize=self.figsize,
             dpi=self.dpi,
         )
-        self.fill_data = np.zeros(
-            (self.nfft, self.num_chunks_per_plot),
+        self.spec_host_data = cupyx.zeros_pinned(
+            (self.nfft, self.num_subchannels, self.num_chunks_per_plot),
             dtype=np.float32,
         )
+        self.fill_data = np.full(
+            (self.nfft, self.num_subchannels, self.num_chunks_per_plot),
+            np.nan,
+            dtype=np.float32,
+        )
+        self.spec_host_data[...] = self.fill_data
         self.norm = mpl.colors.Normalize(vmin=0, vmax=40)
         axs_1d = []
         imgs = []
@@ -269,6 +286,7 @@ class Spectrogram(holoscan.core.Operator):
 
     def initialize(self):
         self.logger.debug("Initializing spectrogram operator")
+        self.create_spec_figure()
 
     def compute(
         self,
@@ -279,6 +297,17 @@ class Spectrogram(holoscan.core.Operator):
         rf_array = op_input.receive("rf_in")
         rf_data = cp.from_dlpack(rf_array.data)
         rf_metadata = rf_array.metadata
+
+        chunk_plot_idx = (
+            rf_metadata.sample_idx // self.chunk_size
+        ) % self.num_chunks_per_plot
+
+        msg = (
+            f"Processing spectrogram for chunk with sample_idx {rf_metadata.sample_idx}"
+            f" into chunk_plot_idx={chunk_plot_idx}"
+        )
+        self.logger.debug(msg)
+
         with cp.cuda.ExternalStream(rf_array.stream):
             freqs, ts, Zxx = cpss.stft(
                 rf_data,
@@ -289,25 +318,38 @@ class Spectrogram(holoscan.core.Operator):
                 noverlap=self.noverlap,
                 nfft=self.nfft,
                 detrend=self.detrend,
+                return_onesided=False,
                 boundary=None,
                 padded=True,
                 axis=0,
-                scaling="psd",
+                scaling="spectrum",
             )
             # reduce over time axis
-            spec = self.reduce_op(Zxx, axis=-1)
-            centered_freqs = freqs + rf_metadata.center_freq
+            spec = self.reduce_op(Zxx.real**2 + Zxx.imag**2, axis=-1)
 
-        if False:
+            cp.asnumpy(
+                spec, out=self.spec_host_data[..., chunk_plot_idx], blocking=False
+            )
+
+        if chunk_plot_idx == (self.num_chunks_per_plot - 1):
+            msg = (
+                "Saving spectrogram figure after chunk with sample_idx"
+                f" {rf_metadata.sample_idx}"
+            )
+            self.logger.debug(msg)
+            spec_power_db = 10 * np.log10(self.spec_host_data)
             # update self.norm.vmin, self.norm.vmax?
             for sch in range(self.num_subchannels):
                 self.imgs[sch].set(
-                    data=spec[:, sch],
-                    extent=(0, 1, 0, 1),
+                    data=spec_power_db[:, sch, :],
+                    extent=(0, 1, -1, 1),
                 )
                 self.fig.canvas.draw()
 
-        self.logger.info(f"{rf_metadata.sample_idx}: {rf_data}")
+            self.fig.savefig("/data/ringbuffer/spec_latest.png")
+
+            # reset spectrogram data for next plot
+            self.spec_host_data[...] = self.fill_data
 
 
 class App(holoscan.core.Application):
