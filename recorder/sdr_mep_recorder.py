@@ -380,7 +380,7 @@ class Spectrogram(holoscan.core.Operator):
 
             spec_power_db = 10 * np.log10(
                 self.spec_host_data
-                / np.percentile(self.spec_host_data, 5, axis=(0, 2), keepdims=True)
+                / np.nanpercentile(self.spec_host_data, 5, axis=(0, 2), keepdims=True)
             )
             # update self.norm.vmin, self.norm.vmax?
             for sch in range(self.num_subchannels):
