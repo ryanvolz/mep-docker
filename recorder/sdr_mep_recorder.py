@@ -273,7 +273,7 @@ class Spectrogram(holoscan.core.Operator):
             order="F",
         )
         self.spec_host_data[...] = self.fill_data
-        self.norm = mpl.colors.Normalize(vmin=None, vmax=None)
+        self.norm = mpl.colors.Normalize(vmin=0, vmax=40)
         axs_1d = []
         imgs = []
         for sch in range(self.num_subchannels):
@@ -378,7 +378,10 @@ class Spectrogram(holoscan.core.Operator):
 
             self.logger.info(f"Saving spectrogram figure for time {plot_start_dt}")
 
-            spec_power_db = 10 * np.log10(self.spec_host_data)
+            spec_power_db = 10 * np.log10(
+                self.spec_host_data
+                / np.percentile(self.spec_host_data, 5, axis=(0, 2), keepdims=True)
+            )
             # update self.norm.vmin, self.norm.vmax?
             for sch in range(self.num_subchannels):
                 self.imgs[sch].set(
@@ -387,7 +390,7 @@ class Spectrogram(holoscan.core.Operator):
                 )
             self.fig.canvas.draw()
 
-            fname = f"spec_{plot_start_dt.isoformat()}.png"
+            fname = f"spec_{plot_start_dt.strftime('%Y-%m-%dT%H:%M:%S')}.png"
             subdir = plot_start_dt.strftime("%Y-%m-%d")
             outpath = self.plot_outdir / subdir / fname
             outpath.parent.mkdir(parents=True, exist_ok=True)
