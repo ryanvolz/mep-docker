@@ -27,6 +27,7 @@ import typing
 import cupy as cp
 import cupyx
 import cupyx.scipy.signal as cpss
+import digital_rf as drf
 import holoscan
 import jsonargparse
 import matplotlib as mpl
@@ -49,6 +50,8 @@ mpl.use("agg")
 logger = logging.getLogger("sdr_mep_recorder.py")
 
 jsonargparse.set_parsing_settings(docstring_parse_attribute_docstrings=True)
+
+DRF_RECORDING_DIR = os.getenv("DRF_RECORDING_DIR", "/data/ringbuffer")
 
 
 @dataclasses.dataclass
@@ -193,8 +196,11 @@ class Spectrogram(holoscan.core.Operator):
         detrend=False,
         reduce_op="max",
         num_chunks_per_plot=300,
+        figsize=(6.4, 4.8),
+        dpi=150,
         col_wrap=3,
         cmap="viridis",
+        plot_outdir=f"{DRF_RECORDING_DIR}/spectrograms",
         **kwargs,
     ):
         """Operator that computes spectrograms from RF data.
@@ -227,8 +233,11 @@ class Spectrogram(holoscan.core.Operator):
         else:
             self.reduce_op = cp.mean
         self.num_chunks_per_plot = num_chunks_per_plot
+        self.figsize = figsize
+        self.dpi = dpi
         self.col_wrap = col_wrap
         self.cmap = cmap
+        self.plot_outdir = pathlib.Path(plot_outdir).resolve()
 
         super().__init__(fragment, *args, **kwargs)
         self.logger = logging.getLogger("Spectrogram")
@@ -337,6 +346,14 @@ class Spectrogram(holoscan.core.Operator):
                 f" {rf_metadata.sample_idx}"
             )
             self.logger.debug(msg)
+
+            plot_start_dt = drf.sample_to_datetime(
+                rf_metadata.sample_idx
+                - self.chunk_size * (self.num_chunks_per_plot - 1),
+                np.longdouble(rf_metadata.sample_rate_numerator)
+                / rf_metadata.sample_rate_denominator,
+            )
+
             spec_power_db = 10 * np.log10(self.spec_host_data)
             # update self.norm.vmin, self.norm.vmax?
             for sch in range(self.num_subchannels):
@@ -344,9 +361,16 @@ class Spectrogram(holoscan.core.Operator):
                     data=spec_power_db[:, sch, :],
                     extent=(0, 1, -1, 1),
                 )
-                self.fig.canvas.draw()
+            self.fig.canvas.draw()
 
-            self.fig.savefig("/data/ringbuffer/spec_latest.png")
+            fname = f"spec_{plot_start_dt.isoformat()}.png"
+            subdir = plot_start_dt.strftime("%Y-%m-%d")
+            outpath = self.plot_outdir / subdir / fname
+            outpath.parent.mkdir(parents=True, exist_ok=True)
+            self.fig.savefig(outpath)
+            latest_spec_path = outpath.parent / "spec_latest.png"
+            latest_spec_path.unlink(missing_ok=True)
+            os.link(outpath, latest_spec_path)
 
             # reset spectrogram data for next plot
             self.spec_host_data[...] = self.fill_data
