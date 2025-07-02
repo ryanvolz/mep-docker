@@ -195,7 +195,7 @@ class Spectrogram(holoscan.core.Operator):
         nfft=None,
         detrend=False,
         reduce_op="max",
-        num_chunks_per_plot=300,
+        num_chunks_per_output=300,
         figsize=(6.4, 4.8),
         dpi=150,
         col_wrap=3,
@@ -232,7 +232,7 @@ class Spectrogram(holoscan.core.Operator):
             self.reduce_op = cp.median
         else:
             self.reduce_op = cp.mean
-        self.num_chunks_per_plot = num_chunks_per_plot
+        self.num_chunks_per_output = num_chunks_per_output
         self.figsize = figsize
         self.dpi = dpi
         self.col_wrap = col_wrap
@@ -262,12 +262,12 @@ class Spectrogram(holoscan.core.Operator):
             dpi=self.dpi,
         )
         self.spec_host_data = cupyx.zeros_pinned(
-            (self.nfft, self.num_subchannels, self.num_chunks_per_plot),
+            (self.nfft, self.num_subchannels, self.num_chunks_per_output),
             dtype=np.float32,
             order="F",
         )
         self.fill_data = np.full(
-            (self.nfft, self.num_subchannels, self.num_chunks_per_plot),
+            (self.nfft, self.num_subchannels, self.num_chunks_per_output),
             np.nan,
             dtype=np.float32,
             order="F",
@@ -335,7 +335,7 @@ class Spectrogram(holoscan.core.Operator):
 
         chunk_plot_idx = (
             rf_metadata.sample_idx // self.chunk_size
-        ) % self.num_chunks_per_plot
+        ) % self.num_chunks_per_output
 
         msg = (
             f"Processing spectrogram for chunk with sample_idx {rf_metadata.sample_idx}"
@@ -368,10 +368,10 @@ class Spectrogram(holoscan.core.Operator):
                 spec, out=self.spec_host_data[..., chunk_plot_idx], blocking=False
             )
 
-        if chunk_plot_idx == (self.num_chunks_per_plot - 1):
+        if chunk_plot_idx == (self.num_chunks_per_output - 1):
             plot_start_dt = drf.util.sample_to_datetime(
                 rf_metadata.sample_idx
-                - self.chunk_size * (self.num_chunks_per_plot - 1),
+                - self.chunk_size * (self.num_chunks_per_output - 1),
                 np.longdouble(rf_metadata.sample_rate_numerator)
                 / rf_metadata.sample_rate_denominator,
             )
