@@ -735,7 +735,7 @@ def main():
     def sigterm_handler(signal, frame):
         logger.info("Received SIGTERM, cleaning up")
         sys.stdout.flush()
-        sys.exit(128 + signal)
+        # sys.exit(128 + signal)
 
     signal.signal(signal.SIGTERM, sigterm_handler)
 
