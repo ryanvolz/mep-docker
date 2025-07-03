@@ -84,6 +84,8 @@ class PipelineParams:
     "Enable / disable the second stage resampler"
     resampler2: bool = True
     "Enable / disable the third stage resampler"
+    spectrogram: bool = True
+    "Enable / disable spectrogram processing and output"
 
 
 @dataclasses.dataclass
