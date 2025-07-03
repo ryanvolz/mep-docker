@@ -383,7 +383,7 @@ class Spectrogram(holoscan.core.Operator):
             order="F",
         )
         self.spec_host_data[...] = self.fill_data
-        self.start_chunk_idx = 0
+        self.last_written_sample_idx = -1
         self.last_seen_sample_idx = None
         self.create_spec_figure()
         self.prior_metadata = None
@@ -400,24 +400,42 @@ class Spectrogram(holoscan.core.Operator):
             )
         )
 
+    def get_chunk_idx(self, sample_idx):
+        return (sample_idx // self.chunk_size) % self.num_chunks_per_output
+
     def write_output(self):
         sample_idx = self.last_seen_sample_idx
-        chunk_idx = (sample_idx // self.chunk_size) % self.num_chunks_per_output
+        if sample_idx <= self.last_written_sample_idx:
+            # skip writing because we already wrote this data
+            return
+        if sample_idx - self.last_written_sample_idx > (
+            self.num_chunks_per_output * self.chunk_size
+        ):
+            # shouldn't be here, trying to write data that spans more than one output batch
+            msg = (
+                f"Call to write_output() with {sample_idx=} when "
+                f"last_written_sample_idx={self.last_written_sample_idx} is more than "
+                f"size of output batch ({self.num_chunks_per_output * self.chunk_size})"
+            )
+            self.logger.warning(msg)
+        chunk_idx = self.get_chunk_idx(sample_idx)
+        start_chunk_idx = (
+            self.get_chunk_idx(self.last_written_sample_idx) + 1
+        ) % self.num_chunks_per_output
 
-        spec_sample_idx = (
-            sample_idx - (chunk_idx - self.start_chunk_idx) * self.chunk_size
+        spec_sample_idx = sample_idx - (chunk_idx - start_chunk_idx) * self.chunk_size
+        sr_frac = fractions.Fraction(
+            self.prior_metadata.sample_rate_numerator,
+            self.prior_metadata.sample_rate_denominator,
         )
         spec_start_dt = drf.util.sample_to_datetime(
             spec_sample_idx,
-            np.longdouble(self.prior_metadata.sample_rate_numerator)
-            / self.prior_metadata.sample_rate_denominator,
+            sr_frac,
         )
-        sample_idx_arr = spec_sample_idx + self.chunk_size * np.arange(
-            0, chunk_idx + 1 - self.start_chunk_idx
-        )
+        chunk_arange = np.arange(0, chunk_idx + 1 - start_chunk_idx)
+        sample_idx_arr = spec_sample_idx + self.chunk_size * chunk_arange
         time_idx = np.datetime64(spec_start_dt.replace(tzinfo=None)) + (
-            np.timedelta64(int(1000000000 / self.chunk_rate_frac), "ns")
-            * np.arange(self.start_chunk_idx, chunk_idx + 1)
+            np.timedelta64(int(1000000000 / self.chunk_rate_frac), "ns") * chunk_arange
         )
 
         self.logger.info(f"Outputting spectrogram for time {spec_start_dt}")
@@ -427,7 +445,7 @@ class Spectrogram(holoscan.core.Operator):
             [
                 {
                     "spectrogram": self.spec_host_data[
-                        ..., self.start_chunk_idx : (chunk_idx + 1)
+                        ..., start_chunk_idx : (chunk_idx + 1)
                     ].transpose((1, 0, 2)),
                     "freq_idx": self.freq_idx + self.prior_metadata.center_freq,
                     "sample_idx": sample_idx_arr,
@@ -457,8 +475,7 @@ class Spectrogram(holoscan.core.Operator):
 
         # reset spectrogram data for next plot
         self.spec_host_data[...] = self.fill_data
-        # chunk index for next part of unwritten data, 1 after the current idx
-        self.start_chunk_idx = (chunk_idx + 1) % self.num_chunks_per_output
+        self.last_written_sample_idx = sample_idx
 
     def compute(
         self,
@@ -470,10 +487,14 @@ class Spectrogram(holoscan.core.Operator):
         rf_data = cp.from_dlpack(rf_array.data)
         rf_metadata = rf_array.metadata
 
+        if (rf_metadata.sample_idx - self.last_seen_sample_idx) > (
+            self.num_chunks_per_output * self.chunk_size
+        ):
+            # new data is not in same output batch as unwritten, so write that first
+            self.write_output()
+
         self.last_seen_sample_idx = rf_metadata.sample_idx
-        chunk_idx = (
-            self.last_seen_sample_idx // self.chunk_size
-        ) % self.num_chunks_per_output
+        chunk_idx = self.get_chunk_idx(self.last_seen_sample_idx)
 
         if self.prior_metadata is None:
             self.set_metadata(rf_metadata)
@@ -506,9 +527,7 @@ class Spectrogram(holoscan.core.Operator):
             or (self.prior_metadata.center_freq != rf_metadata.center_freq)
         ):
             # metadata changed, write out existing data and start anew
-            if chunk_idx != 0:
-                # skip when chunk_idx == 0 because we just wrote this same output
-                self.write_output()
+            self.write_output()
             self.set_metadata(rf_metadata)
 
         msg = (
@@ -544,15 +563,12 @@ class Spectrogram(holoscan.core.Operator):
             self.write_output()
 
     def stop(self):
-        chunk_idx = (
-            self.last_seen_sample_idx // self.chunk_size
-        ) % self.num_chunks_per_output
-        self.logger.info(
-            f"Stopping spectrogram operator with last_seen_sample_idx={self.last_seen_sample_idx}, {chunk_idx=}."
+        msg = (
+            "Stopping spectrogram operator with "
+            f"last_seen_sample_idx={self.last_seen_sample_idx}."
         )
-        if chunk_idx != 0:
-            # we have unwritten data, so write it out before stopping
-            self.write_output()
+        self.logger.info(msg)
+        self.write_output()
 
 
 class App(holoscan.core.Application):
