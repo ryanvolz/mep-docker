@@ -25,6 +25,7 @@ pipeline:
   resampler0: true
   resampler1: false
   resampler2: true
+  spectrogram: true
 
 packet:
   batch_size: &batch_size 6250 # Number of packets to process at once into tensor data

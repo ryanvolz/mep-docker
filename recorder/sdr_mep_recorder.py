@@ -689,13 +689,14 @@ class App(holoscan.core.Application):
         )
         self.add_flow(last_op, dmd_sink)
 
-        spectrogram = Spectrogram(
-            self,
-            name="spectrogram",
-            data_outdir=f"{DRF_RECORDING_DIR}/{self.kwargs('drf_sink')['channel_dir']}_spectrogram",
-            **add_chunk_kwargs(last_chunk_shape, **self.kwargs("spectrogram")),
-        )
-        self.add_flow(last_op, spectrogram)
+        if self.kwargs("pipeline")["spectrogram"]:
+            spectrogram = Spectrogram(
+                self,
+                name="spectrogram",
+                data_outdir=f"{DRF_RECORDING_DIR}/{self.kwargs('drf_sink')['channel_dir']}_spectrogram",
+                **add_chunk_kwargs(last_chunk_shape, **self.kwargs("spectrogram")),
+            )
+            self.add_flow(last_op, spectrogram)
 
 
 def main():
