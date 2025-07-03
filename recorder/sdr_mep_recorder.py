@@ -419,6 +419,10 @@ class Spectrogram(holoscan.core.Operator):
         )
 
         self.logger.info(f"Outputting spectrogram for time {spec_start_dt}")
+        self.logger.info(f"{chunk_idx=}")
+        self.logger.info(f"{self.prior_metadata.sample_idx=}")
+        self.logger.info(f"{spec_sample_idx=}")
+        self.logger.info(f"{self.prior_metadata.center_freq=}")
 
         self.dmd_writer.write(
             [spec_sample_idx],
