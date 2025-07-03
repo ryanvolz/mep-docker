@@ -572,6 +572,9 @@ class Spectrogram(holoscan.core.Operator):
         self.logger.info(msg)
         self.write_output()
 
+    def __del__(self):
+        self.stop()
+
 
 class App(holoscan.core.Application):
     def compose(self):
