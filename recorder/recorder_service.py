@@ -3,6 +3,7 @@ import json
 import os
 import pathlib
 import shutil
+import signal
 import time
 import traceback
 from typing import Any, Optional
@@ -140,7 +141,7 @@ async def run_recorder(client, service):
             try:
                 await process.wait()
             finally:
-                process.terminate()
+                process.send_signal(signal.SIGINT)
                 channel_dir = pathlib.Path(service.config["drf_sink.channel_dir"])
                 shutil.rmtree(channel_dir, ignore_errors=True)
                 service.recording_enabled = False
