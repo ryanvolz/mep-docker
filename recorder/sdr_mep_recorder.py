@@ -751,7 +751,6 @@ def main():
         # catch keyboard interrupt and simply exit
         pass
     finally:
-        app.stop_execution()
         logger.info("Done")
         sys.stdout.flush()
 
