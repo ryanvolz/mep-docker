@@ -384,7 +384,7 @@ class Spectrogram(holoscan.core.Operator):
         )
         self.spec_host_data[...] = self.fill_data
         self.last_written_sample_idx = -1
-        self.last_seen_sample_idx = None
+        self.last_seen_sample_idx = -1
         self.create_spec_figure()
         self.prior_metadata = None
         self.freq_idx = None
