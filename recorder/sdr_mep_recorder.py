@@ -106,8 +106,6 @@ class BasicNetworkOperatorParams:
 class SpectrogramParams:
     """Spectrogram parameters"""
 
-    data_outdir: os.PathLike
-    """Directory for writing spectrogram data"""
     window: str = "hann"
     """Window function to apply before taking FFT"""
     nperseg: int = 1024
