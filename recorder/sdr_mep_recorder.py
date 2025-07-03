@@ -108,8 +108,38 @@ class SpectrogramParams:
 
     data_outdir: os.PathLike
     """Directory for writing spectrogram data"""
+    window: str = "hann"
+    """Window function to apply before taking FFT"""
+    nperseg: int = 1024
+    """Length of each segment of samples on which to calculate a spectrum"""
+    noverlap: typing.Optional[int] = None
+    """Number of samples to overlap between segments. If None, `noverlap = nperseg // 2`"""
+    nfft: typing.Optional[int] = None
+    """Length of FFT used per segment. If None, `nfft = nperseg`"""
+    detrend: typing.Union[
+        typing.Literal["linear"], typing.Literal["constant"], typing.Literal[False]
+    ] = False
+    """Specifies how to detrend each segment. ["constant", "linear", or False]"""
+    reduce_op: typing.Union[
+        typing.Literal["max"], typing.Literal["median"], typing.Literal["mean"]
+    ] = "max"
+    """Operation to use to reduce segment spectra to one result per chunk. ["max", "median", or "mean"]"""
+    num_chunks_per_output: int = 300
+    """Number of chunks to combine in a single output, either a data sample or plot"""
+    figsize: tuple[float, float] = (6.4, 4.8)
+    """Figure size in inches given as a tuple of (width, height)"""
+    dpi: int = 150
+    """Figure dots per inch"""
+    col_wrap: int = 1
+    """Number of columns of spectrograms to use in the figure, wrapping to new rows"""
     cmap: str = "viridis"
     """Colormap"""
+    snr_db_min: float = -10
+    """Spectrogram color scale minimum, given as SNR in decibels"""
+    snr_db_max: float = 40
+    """Spectrogram color scale maximum, given as SNR in decibels"""
+    plot_outdir: os.PathLike = f"{DRF_RECORDING_DIR}/spectrograms"
+    """Directory for writing spectrogram plots"""
 
 
 @dataclasses.dataclass
@@ -182,10 +212,27 @@ def build_config_parser():
 
 
 class Spectrogram(holoscan.core.Operator):
-    window: str
-    reduce_op: str
     chunk_size: int
     num_subchannels: int
+    data_outdir = os.PathLike
+    window: str
+    nperseg: int
+    noverlap: typing.Optional[int]
+    nfft: typing.Optional[int]
+    detrend: typing.Union[
+        typing.Literal["linear"], typing.Literal["constant"], typing.Literal[False]
+    ]
+    reduce_op: typing.Union[
+        typing.Literal["max"], typing.Literal["median"], typing.Literal["mean"]
+    ]
+    num_chunks_per_output: int
+    figsize: tuple[float, float]
+    dpi: int
+    col_wrap: int
+    cmap: str
+    snr_db_min: float
+    snr_db_max: float
+    plot_outdir: os.PathLike
 
     def __init__(
         self,
@@ -203,8 +250,10 @@ class Spectrogram(holoscan.core.Operator):
         num_chunks_per_output=300,
         figsize=(6.4, 4.8),
         dpi=150,
-        col_wrap=3,
+        col_wrap=1,
         cmap="viridis",
+        snr_db_min=-10,
+        snr_db_max=40,
         plot_outdir=f"{DRF_RECORDING_DIR}/spectrograms",
         **kwargs,
     ):
@@ -218,7 +267,37 @@ class Spectrogram(holoscan.core.Operator):
         Parameters
         ----------
         fragment : Fragment
-            The fragment that the operator belongs to.
+            The fragment that the operator belongs to
+        data_outdir: os.PathLike
+            Directory for writing spectrogram data
+        window: str
+            Window function to apply before taking FFT
+        nperseg: int
+            Length of each segment of samples on which to calculate a spectrum
+        noverlap: int or None
+            Number of samples to overlap between segments. If None, `noverlap = nperseg // 2`
+        nfft: int or None
+            Length of FFT used per segment. If None, `nfft = nperseg`
+        detrend: "constant", "linear", or False
+            Specifies how to detrend each segment.
+        reduce_op: "max", "median", or "mean"
+            Operation to use to reduce segment spectra to one result per chunk.
+        num_chunks_per_output: int
+            Number of chunks to combine in a single output, either a data sample or plot
+        figsize: tuple[float, float]
+            Figure size in inches given as a tuple of (width, height)
+        dpi: int
+            Figure dots per inch
+        col_wrap: int
+            Number of columns of spectrograms to use in the figure, wrapping to new rows
+        cmap: str
+            Colormap
+        snr_db_min: float
+            Spectrogram color scale minimum, given as SNR in decibels
+        snr_db_max: float
+            Spectrogram color scale maximum, given as SNR in decibels
+        plot_outdir: os.PathLike
+            Directory for writing spectrogram plots
         """
         self.chunk_size = chunk_size
         self.num_subchannels = num_subchannels
@@ -243,6 +322,8 @@ class Spectrogram(holoscan.core.Operator):
         self.dpi = dpi
         self.col_wrap = col_wrap
         self.cmap = cmap
+        self.snr_db_min = snr_db_min
+        self.snr_db_max = snr_db_max
         self.plot_outdir = pathlib.Path(plot_outdir).resolve()
 
         super().__init__(fragment, *args, **kwargs)
@@ -267,7 +348,7 @@ class Spectrogram(holoscan.core.Operator):
             figsize=self.figsize,
             dpi=self.dpi,
         )
-        self.norm = mpl.colors.Normalize(vmin=0, vmax=40)
+        self.norm = mpl.colors.Normalize(vmin=self.snr_db_min, vmax=self.snr_db_max)
         axs_1d = []
         imgs = []
         for sch in range(self.num_subchannels):
@@ -353,7 +434,7 @@ class Spectrogram(holoscan.core.Operator):
 
         spec_power_db = 10 * np.log10(
             self.spec_host_data
-            / np.nanpercentile(self.spec_host_data, 5, axis=(0, 2), keepdims=True)
+            / np.nanpercentile(self.spec_host_data, 15, axis=(0, 2), keepdims=True)
         )
         for sch in range(self.num_subchannels):
             self.imgs[sch].set(
