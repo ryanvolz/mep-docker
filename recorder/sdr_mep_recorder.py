@@ -384,6 +384,7 @@ class Spectrogram(holoscan.core.Operator):
         )
         self.spec_host_data[...] = self.fill_data
         self.start_chunk_idx = 0
+        self.last_seen_sample_idx = None
         self.create_spec_figure()
         self.prior_metadata = None
         self.freq_idx = None
@@ -399,17 +400,20 @@ class Spectrogram(holoscan.core.Operator):
             )
         )
 
-    def write_output(self, sample_idx):
+    def write_output(self):
+        sample_idx = self.last_seen_sample_idx
         chunk_idx = (sample_idx // self.chunk_size) % self.num_chunks_per_output
 
-        spec_sample_idx = sample_idx - chunk_idx * self.chunk_size
+        spec_sample_idx = (
+            sample_idx - (chunk_idx - self.start_chunk_idx) * self.chunk_size
+        )
         spec_start_dt = drf.util.sample_to_datetime(
             spec_sample_idx,
             np.longdouble(self.prior_metadata.sample_rate_numerator)
             / self.prior_metadata.sample_rate_denominator,
         )
         sample_idx_arr = spec_sample_idx + self.chunk_size * np.arange(
-            self.start_chunk_idx, chunk_idx + 1
+            0, chunk_idx + 1 - self.start_chunk_idx
         )
         time_idx = np.datetime64(spec_start_dt.replace(tzinfo=None)) + (
             np.timedelta64(int(1000000000 / self.chunk_rate_frac), "ns")
@@ -471,8 +475,9 @@ class Spectrogram(holoscan.core.Operator):
         rf_data = cp.from_dlpack(rf_array.data)
         rf_metadata = rf_array.metadata
 
+        self.last_seen_sample_idx = rf_metadata.sample_idx
         chunk_idx = (
-            rf_metadata.sample_idx // self.chunk_size
+            self.last_seen_sample_idx // self.chunk_size
         ) % self.num_chunks_per_output
 
         if self.prior_metadata is None:
@@ -508,7 +513,7 @@ class Spectrogram(holoscan.core.Operator):
             # metadata changed, write out existing data and start anew
             if chunk_idx != 0:
                 # skip when chunk_idx == 0 because we just wrote this same output
-                self.write_output(rf_metadata.sample_idx)
+                self.write_output()
             self.set_metadata(rf_metadata)
 
         msg = (
@@ -541,7 +546,15 @@ class Spectrogram(holoscan.core.Operator):
             cp.asnumpy(spec, out=self.spec_host_data[..., chunk_idx], blocking=False)
 
         if chunk_idx == (self.num_chunks_per_output - 1):
-            self.write_output(rf_metadata.sample_idx)
+            self.write_output()
+
+    def stop(self):
+        chunk_idx = (
+            self.last_seen_sample_idx // self.chunk_size
+        ) % self.num_chunks_per_output
+        if chunk_idx != 0:
+            # we have unwritten data, so write it out before stopping
+            self.write_output()
 
 
 class App(holoscan.core.Application):
