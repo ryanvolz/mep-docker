@@ -408,9 +408,9 @@ class Spectrogram(holoscan.core.Operator):
         if sample_idx <= self.last_written_sample_idx:
             # skip writing because we already wrote this data
             return
-        if sample_idx - self.last_written_sample_idx > (
-            self.num_chunks_per_output * self.chunk_size
-        ):
+        if self.last_written_sample_idx != -1 and (
+            sample_idx - self.last_written_sample_idx
+        ) > (self.num_chunks_per_output * self.chunk_size):
             # shouldn't be here, trying to write data that spans more than one output batch
             msg = (
                 f"Call to write_output() with {sample_idx=} when "
@@ -745,6 +745,7 @@ def main():
         # catch keyboard interrupt and simply exit
         pass
     finally:
+        app.stop_execution()
         logger.info("Done")
         sys.stdout.flush()
 
