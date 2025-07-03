@@ -421,11 +421,6 @@ class Spectrogram(holoscan.core.Operator):
         )
 
         self.logger.info(f"Outputting spectrogram for time {spec_start_dt}")
-        self.logger.info(f"{chunk_idx=}")
-        self.logger.info(f"{self.start_chunk_idx=}")
-        self.logger.info(f"{sample_idx=}")
-        self.logger.info(f"{spec_sample_idx=}")
-        self.logger.info(f"{self.prior_metadata.center_freq=}")
 
         self.dmd_writer.write(
             [spec_sample_idx],
@@ -552,6 +547,9 @@ class Spectrogram(holoscan.core.Operator):
         chunk_idx = (
             self.last_seen_sample_idx // self.chunk_size
         ) % self.num_chunks_per_output
+        self.logger.info(
+            f"Stopping spectrogram operator with last_seen_sample_idx={self.last_seen_sample_idx}, {chunk_idx=}."
+        )
         if chunk_idx != 0:
             # we have unwritten data, so write it out before stopping
             self.write_output()
