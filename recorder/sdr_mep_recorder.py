@@ -410,7 +410,10 @@ class Spectrogram(holoscan.core.Operator):
             np.longdouble(self.prior_metadata.sample_rate_numerator)
             / self.prior_metadata.sample_rate_denominator,
         )
-        time_idx = np.datetime64(spec_start_dt) + (
+        sample_idx_arr = spec_sample_idx + self.chunk_size * np.arange(
+            self.start_chunk_idx, chunk_idx + 1
+        )
+        time_idx = np.datetime64(spec_start_dt.replace(tzinfo=None)) + (
             np.timedelta64(int(1000000000 / self.chunk_rate_frac), "ns")
             * np.arange(self.start_chunk_idx, chunk_idx + 1)
         )
@@ -425,7 +428,7 @@ class Spectrogram(holoscan.core.Operator):
                         ..., self.start_chunk_idx : (chunk_idx + 1)
                     ].transpose((1, 0, 2)),
                     "freq_idx": self.freq_idx + self.prior_metadata.center_freq,
-                    "time_idx": time_idx,
+                    "sample_idx": sample_idx_arr,
                 }
             ],
         )
