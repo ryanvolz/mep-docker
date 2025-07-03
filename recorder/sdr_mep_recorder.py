@@ -452,7 +452,7 @@ class Spectrogram(holoscan.core.Operator):
         outpath = self.plot_outdir / subdir / fname
         outpath.parent.mkdir(parents=True, exist_ok=True)
         self.fig.savefig(outpath)
-        latest_spec_path = outpath.parent / "spec_latest.png"
+        latest_spec_path = outpath.parent.parent / "spec_latest.png"
         latest_spec_path.unlink(missing_ok=True)
         os.link(outpath, latest_spec_path)
 
@@ -541,7 +541,7 @@ class Spectrogram(holoscan.core.Operator):
             cp.asnumpy(spec, out=self.spec_host_data[..., chunk_idx], blocking=False)
 
         if chunk_idx == (self.num_chunks_per_output - 1):
-            self.write_output()
+            self.write_output(rf_metadata.sample_idx)
 
 
 class App(holoscan.core.Application):
