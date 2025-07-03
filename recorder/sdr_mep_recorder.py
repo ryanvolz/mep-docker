@@ -399,12 +399,10 @@ class Spectrogram(holoscan.core.Operator):
             )
         )
 
-    def write_output(self):
-        chunk_idx = (
-            self.prior_metadata.sample_idx // self.chunk_size
-        ) % self.num_chunks_per_output
+    def write_output(self, sample_idx):
+        chunk_idx = (sample_idx // self.chunk_size) % self.num_chunks_per_output
 
-        spec_sample_idx = self.prior_metadata.sample_idx - chunk_idx * self.chunk_size
+        spec_sample_idx = sample_idx - chunk_idx * self.chunk_size
         spec_start_dt = drf.util.sample_to_datetime(
             spec_sample_idx,
             np.longdouble(self.prior_metadata.sample_rate_numerator)
@@ -420,7 +418,8 @@ class Spectrogram(holoscan.core.Operator):
 
         self.logger.info(f"Outputting spectrogram for time {spec_start_dt}")
         self.logger.info(f"{chunk_idx=}")
-        self.logger.info(f"{self.prior_metadata.sample_idx=}")
+        self.logger.info(f"{self.start_chunk_idx=}")
+        self.logger.info(f"{sample_idx=}")
         self.logger.info(f"{spec_sample_idx=}")
         self.logger.info(f"{self.prior_metadata.center_freq=}")
 
@@ -509,7 +508,7 @@ class Spectrogram(holoscan.core.Operator):
             # metadata changed, write out existing data and start anew
             if chunk_idx != 0:
                 # skip when chunk_idx == 0 because we just wrote this same output
-                self.write_output()
+                self.write_output(rf_metadata.sample_idx)
             self.set_metadata(rf_metadata)
 
         msg = (
