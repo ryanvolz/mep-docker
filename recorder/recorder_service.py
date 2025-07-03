@@ -147,6 +147,7 @@ async def run_recorder(client, service):
                 service.recording_enabled = False
                 service.recording_scope = None
                 with anyio.CancelScope(shield=True):
+                    await process.wait()
                     await send_status(client, service)
 
 
