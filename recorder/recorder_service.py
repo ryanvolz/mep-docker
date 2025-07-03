@@ -133,16 +133,20 @@ async def run_recorder(client, service):
     ]
     with anyio.CancelScope() as scope:
         service.recording_scope = scope
-        try:
-            await send_status(client, service)
-            await anyio.run_process(command, stdout=None, stderr=None, check=False)
-        finally:
-            channel_dir = pathlib.Path(service.config["drf_sink.channel_dir"])
-            shutil.rmtree(channel_dir, ignore_errors=True)
-            service.recording_enabled = False
-            service.recording_scope = None
-            with anyio.CancelScope(shield=True):
-                await send_status(client, service)
+        await send_status(client, service)
+        async with await anyio.open_process(
+            command, stdout=None, stderr=None
+        ) as process:
+            try:
+                await process.wait()
+            finally:
+                process.terminate()
+                channel_dir = pathlib.Path(service.config["drf_sink.channel_dir"])
+                shutil.rmtree(channel_dir, ignore_errors=True)
+                service.recording_enabled = False
+                service.recording_scope = None
+                with anyio.CancelScope(shield=True):
+                    await send_status(client, service)
 
 
 def disable_recording(service):
