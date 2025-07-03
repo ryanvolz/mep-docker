@@ -16,6 +16,8 @@
 # limitations under the License.
 
 import dataclasses
+import datetime
+import fractions
 import logging
 import os
 import pathlib
@@ -104,6 +106,8 @@ class BasicNetworkOperatorParams:
 class SpectrogramParams:
     """Spectrogram parameters"""
 
+    data_outdir: os.PathLike
+    """Directory for writing spectrogram data"""
     cmap: str = "viridis"
     """Colormap"""
 
@@ -188,6 +192,7 @@ class Spectrogram(holoscan.core.Operator):
         fragment,
         chunk_size,
         num_subchannels,
+        data_outdir,
         *args,
         window="hann",
         nperseg=1024,
@@ -217,6 +222,7 @@ class Spectrogram(holoscan.core.Operator):
         """
         self.chunk_size = chunk_size
         self.num_subchannels = num_subchannels
+        self.data_outdir = pathlib.Path(data_outdir).resolve()
         self.window = window
         self.nperseg = nperseg
         if noverlap is None:
@@ -261,18 +267,6 @@ class Spectrogram(holoscan.core.Operator):
             figsize=self.figsize,
             dpi=self.dpi,
         )
-        self.spec_host_data = cupyx.zeros_pinned(
-            (self.nfft, self.num_subchannels, self.num_chunks_per_output),
-            dtype=np.float32,
-            order="F",
-        )
-        self.fill_data = np.full(
-            (self.nfft, self.num_subchannels, self.num_chunks_per_output),
-            np.nan,
-            dtype=np.float32,
-            order="F",
-        )
-        self.spec_host_data[...] = self.fill_data
         self.norm = mpl.colors.Normalize(vmin=0, vmax=40)
         axs_1d = []
         imgs = []
@@ -297,9 +291,90 @@ class Spectrogram(holoscan.core.Operator):
 
     def initialize(self):
         self.logger.debug("Initializing spectrogram operator")
+        self.data_outdir.mkdir(parents=True, exist_ok=True)
+        self.spec_host_data = cupyx.zeros_pinned(
+            (self.nfft, self.num_subchannels, self.num_chunks_per_output),
+            dtype=np.float32,
+            order="F",
+        )
+        self.fill_data = np.full(
+            (self.nfft, self.num_subchannels, self.num_chunks_per_output),
+            np.nan,
+            dtype=np.float32,
+            order="F",
+        )
+        self.spec_host_data[...] = self.fill_data
+        self.start_chunk_idx = 0
         self.create_spec_figure()
         self.prior_metadata = None
         self.freq_idx = None
+        self.dmd_writer = None
+        self.chunk_rate_frac = None
+
+    def set_metadata(self, rf_metadata):
+        self.prior_metadata = rf_metadata
+        self.freq_idx = np.fft.fftshift(
+            np.fft.fftfreq(
+                self.nfft,
+                rf_metadata.sample_rate_denominator / rf_metadata.sample_rate_numerator,
+            )
+        )
+
+    def write_output(self):
+        chunk_idx = (
+            self.prior_metadata.sample_idx // self.chunk_size
+        ) % self.num_chunks_per_output
+
+        spec_sample_idx = self.prior_metadata.sample_idx - chunk_idx * self.chunk_size
+        spec_start_dt = drf.util.sample_to_datetime(
+            spec_sample_idx,
+            np.longdouble(self.prior_metadata.sample_rate_numerator)
+            / self.prior_metadata.sample_rate_denominator,
+        )
+        time_idx = np.datetime64(spec_start_dt) + (
+            np.timedelta64(int(1000000000 / self.chunk_rate_frac), "ns")
+            * np.arange(self.start_chunk_idx, chunk_idx + 1)
+        )
+
+        self.logger.info(f"Outputting spectrogram for time {spec_start_dt}")
+
+        self.dmd_writer.write(
+            [spec_sample_idx],
+            [
+                {
+                    "spectrogram": self.spec_host_data[
+                        ..., self.start_chunk_idx : (chunk_idx + 1)
+                    ].transpose((1, 0, 2)),
+                    "freq_idx": self.freq_idx + self.prior_metadata.center_freq,
+                    "time_idx": time_idx,
+                }
+            ],
+        )
+
+        spec_power_db = 10 * np.log10(
+            self.spec_host_data
+            / np.nanpercentile(self.spec_host_data, 5, axis=(0, 2), keepdims=True)
+        )
+        for sch in range(self.num_subchannels):
+            self.imgs[sch].set(
+                data=spec_power_db[:, sch, :],
+                extent=(0, 1, -1, 1),
+            )
+        self.fig.canvas.draw()
+
+        fname = f"spec_{spec_start_dt.strftime('%Y-%m-%dT%H:%M:%S')}.png"
+        subdir = spec_start_dt.strftime("%Y-%m-%d")
+        outpath = self.plot_outdir / subdir / fname
+        outpath.parent.mkdir(parents=True, exist_ok=True)
+        self.fig.savefig(outpath)
+        latest_spec_path = outpath.parent / "spec_latest.png"
+        latest_spec_path.unlink(missing_ok=True)
+        os.link(outpath, latest_spec_path)
+
+        # reset spectrogram data for next plot
+        self.spec_host_data[...] = self.fill_data
+        # chunk index for next part of unwritten data, 1 after the current idx
+        self.start_chunk_idx = (chunk_idx + 1) % self.num_chunks_per_output
 
     def compute(
         self,
@@ -311,14 +386,28 @@ class Spectrogram(holoscan.core.Operator):
         rf_data = cp.from_dlpack(rf_array.data)
         rf_metadata = rf_array.metadata
 
+        chunk_idx = (
+            rf_metadata.sample_idx // self.chunk_size
+        ) % self.num_chunks_per_output
+
         if self.prior_metadata is None:
-            self.prior_metadata = rf_metadata
-            self.freq_idx = np.fft.fftshift(
-                np.fft.fftfreq(
-                    self.nfft,
-                    rf_metadata.sample_rate_denominator
-                    / rf_metadata.sample_rate_numerator,
+            self.set_metadata(rf_metadata)
+            self.chunk_rate_frac = fractions.Fraction(
+                self.prior_metadata.sample_rate_numerator,
+                self.prior_metadata.sample_rate_denominator * self.chunk_size,
+            )
+            self.dmd_writer = drf.DigitalMetadataWriter(
+                metadata_dir=str(self.data_outdir),
+                subdir_cadence_secs=3600,
+                file_cadence_secs=drf.util.samples_to_timedelta(
+                    self.num_chunks_per_output * self.chunk_size,
+                    np.longdouble(self.prior_metadata.sample_rate_numerator)
+                    / self.prior_metadata.sample_rate_denominator,
                 )
+                // datetime.timedelta(seconds=1),
+                sample_rate_numerator=self.prior_metadata.sample_rate_numerator,
+                sample_rate_denominator=self.prior_metadata.sample_rate_denominator,
+                file_name="spectrogram",
             )
         if (
             (
@@ -331,15 +420,15 @@ class Spectrogram(holoscan.core.Operator):
             )
             or (self.prior_metadata.center_freq != rf_metadata.center_freq)
         ):
-            self.logger.info("rf_metadata does not match prior")
-
-        chunk_plot_idx = (
-            rf_metadata.sample_idx // self.chunk_size
-        ) % self.num_chunks_per_output
+            # metadata changed, write out existing data and start anew
+            if chunk_idx != 0:
+                # skip when chunk_idx == 0 because we just wrote this same output
+                self.write_output()
+            self.set_metadata(rf_metadata)
 
         msg = (
             f"Processing spectrogram for chunk with sample_idx {rf_metadata.sample_idx}"
-            f" into chunk_plot_idx={chunk_plot_idx}"
+            f" into chunk_idx={chunk_idx}"
         )
         self.logger.debug(msg)
 
@@ -364,43 +453,10 @@ class Spectrogram(holoscan.core.Operator):
                 self.reduce_op(Zxx.real**2 + Zxx.imag**2, axis=-1), axes=0
             )
 
-            cp.asnumpy(
-                spec, out=self.spec_host_data[..., chunk_plot_idx], blocking=False
-            )
+            cp.asnumpy(spec, out=self.spec_host_data[..., chunk_idx], blocking=False)
 
-        if chunk_plot_idx == (self.num_chunks_per_output - 1):
-            plot_start_dt = drf.util.sample_to_datetime(
-                rf_metadata.sample_idx
-                - self.chunk_size * (self.num_chunks_per_output - 1),
-                np.longdouble(rf_metadata.sample_rate_numerator)
-                / rf_metadata.sample_rate_denominator,
-            )
-
-            self.logger.info(f"Saving spectrogram figure for time {plot_start_dt}")
-
-            spec_power_db = 10 * np.log10(
-                self.spec_host_data
-                / np.nanpercentile(self.spec_host_data, 5, axis=(0, 2), keepdims=True)
-            )
-            # update self.norm.vmin, self.norm.vmax?
-            for sch in range(self.num_subchannels):
-                self.imgs[sch].set(
-                    data=spec_power_db[:, sch, :],
-                    extent=(0, 1, -1, 1),
-                )
-            self.fig.canvas.draw()
-
-            fname = f"spec_{plot_start_dt.strftime('%Y-%m-%dT%H:%M:%S')}.png"
-            subdir = plot_start_dt.strftime("%Y-%m-%d")
-            outpath = self.plot_outdir / subdir / fname
-            outpath.parent.mkdir(parents=True, exist_ok=True)
-            self.fig.savefig(outpath)
-            latest_spec_path = outpath.parent / "spec_latest.png"
-            latest_spec_path.unlink(missing_ok=True)
-            os.link(outpath, latest_spec_path)
-
-            # reset spectrogram data for next plot
-            self.spec_host_data[...] = self.fill_data
+        if chunk_idx == (self.num_chunks_per_output - 1):
+            self.write_output()
 
 
 class App(holoscan.core.Application):
@@ -524,6 +580,7 @@ class App(holoscan.core.Application):
         spectrogram = Spectrogram(
             self,
             name="spectrogram",
+            data_outdir=f"{self.kwargs('drf_sink')['channel_dir']}_spectrogram",
             **add_chunk_kwargs(last_chunk_shape, **self.kwargs("spectrogram")),
         )
         self.add_flow(last_op, spectrogram)
