@@ -124,6 +124,8 @@ class SpectrogramParams:
         typing.Literal["max"], typing.Literal["median"], typing.Literal["mean"]
     ] = "max"
     """Operation to use to reduce segment spectra to one result per chunk. ["max", "median", or "mean"]"""
+    num_spectra_per_chunk: int = 1
+    """Number of spectra samples to calculate per chunk of data. Must evenly divide `chunk_size`."""
     num_chunks_per_output: int = 300
     """Number of chunks to combine in a single output, either a data sample or plot"""
     figsize: tuple[float, float] = (6.4, 4.8)
@@ -225,6 +227,7 @@ class Spectrogram(holoscan.core.Operator):
     reduce_op: typing.Union[
         typing.Literal["max"], typing.Literal["median"], typing.Literal["mean"]
     ]
+    num_spectra_per_chunk: int
     num_chunks_per_output: int
     figsize: tuple[float, float]
     dpi: int
@@ -247,6 +250,7 @@ class Spectrogram(holoscan.core.Operator):
         nfft=None,
         detrend=False,
         reduce_op="max",
+        num_spectra_per_chunk=1,
         num_chunks_per_output=300,
         figsize=(6.4, 4.8),
         dpi=150,
@@ -268,6 +272,10 @@ class Spectrogram(holoscan.core.Operator):
         ----------
         fragment : Fragment
             The fragment that the operator belongs to
+        chunk_size: int
+            Number of samples in an RFArray chunk of data
+        num_subchannels: int
+            Number of subchannels contained in the RFArray data
         data_outdir: os.PathLike
             Directory for writing spectrogram data
         window: str
@@ -281,7 +289,10 @@ class Spectrogram(holoscan.core.Operator):
         detrend: "constant", "linear", or False
             Specifies how to detrend each segment.
         reduce_op: "max", "median", or "mean"
-            Operation to use to reduce segment spectra to one result per chunk.
+            Operation to use to reduce multiple segment spectra to one.
+        num_spectra_per_chunk: int
+            Number of spectra samples to calculate per chunk of data.
+            Must evenly divide `chunk_size`.
         num_chunks_per_output: int
             Number of chunks to combine in a single output, either a data sample or plot
         figsize: tuple[float, float]
@@ -317,7 +328,17 @@ class Spectrogram(holoscan.core.Operator):
             self.reduce_op = cp.median
         else:
             self.reduce_op = cp.mean
+        if (self.chunk_size % num_spectra_per_chunk) != 0:
+            msg = (
+                f"Number of spectra per chunk ({num_spectra_per_chunk}) must evenly"
+                f" divide the chunk size ({chunk_size})."
+            )
+            raise ValueError(msg)
+        self.num_spectra_per_chunk = num_spectra_per_chunk
         self.num_chunks_per_output = num_chunks_per_output
+        self.num_spectra_per_output = (
+            self.num_spectra_per_chunk * self.num_chunks_per_output
+        )
         self.figsize = figsize
         self.dpi = dpi
         self.col_wrap = col_wrap
@@ -374,12 +395,12 @@ class Spectrogram(holoscan.core.Operator):
         self.logger.debug("Initializing spectrogram operator")
         self.data_outdir.mkdir(parents=True, exist_ok=True)
         self.spec_host_data = cupyx.zeros_pinned(
-            (self.nfft, self.num_subchannels, self.num_chunks_per_output),
+            (self.nfft, self.num_subchannels, self.num_spectra_per_output),
             dtype=np.float32,
             order="F",
         )
         self.fill_data = np.full(
-            (self.nfft, self.num_subchannels, self.num_chunks_per_output),
+            (self.nfft, self.num_subchannels, self.num_spectra_per_output),
             np.nan,
             dtype=np.float32,
             order="F",
@@ -434,10 +455,16 @@ class Spectrogram(holoscan.core.Operator):
             spec_sample_idx,
             sr_frac,
         )
-        chunk_arange = np.arange(0, chunk_idx + 1 - start_chunk_idx)
-        sample_idx_arr = spec_sample_idx + self.chunk_size * chunk_arange
+        spectra_arange = np.arange(
+            0, (chunk_idx + 1 - start_chunk_idx) * self.num_spectra_per_chunk
+        )
+        sample_idx_arr = (
+            spec_sample_idx
+            + self.chunk_size // self.num_spectra_per_chunk * spectra_arange
+        )
         time_idx = np.datetime64(spec_start_dt.replace(tzinfo=None)) + (
-            np.timedelta64(int(1000000000 / self.chunk_rate_frac), "ns") * chunk_arange
+            np.timedelta64(int(1000000000 / self.spectra_rate_frac), "ns")
+            * spectra_arange
         )
 
         self.logger.info(f"Outputting spectrogram for time {spec_start_dt}")
@@ -447,7 +474,9 @@ class Spectrogram(holoscan.core.Operator):
             [
                 {
                     "spectrogram": self.spec_host_data[
-                        ..., start_chunk_idx : (chunk_idx + 1)
+                        ...,
+                        start_chunk_idx * self.num_spectra_per_chunk : (chunk_idx + 1)
+                        * self.num_spectra_per_chunk,
                     ].transpose((1, 0, 2)),
                     "freq_idx": self.freq_idx + self.prior_metadata.center_freq,
                     "sample_idx": sample_idx_arr,
@@ -500,8 +529,8 @@ class Spectrogram(holoscan.core.Operator):
 
         if self.prior_metadata is None:
             self.set_metadata(rf_metadata)
-            self.chunk_rate_frac = fractions.Fraction(
-                self.prior_metadata.sample_rate_numerator,
+            self.spectra_rate_frac = fractions.Fraction(
+                self.prior_metadata.sample_rate_numerator * self.num_spectra_per_chunk,
                 self.prior_metadata.sample_rate_denominator * self.chunk_size,
             )
             self.dmd_writer = drf.DigitalMetadataWriter(
@@ -539,27 +568,35 @@ class Spectrogram(holoscan.core.Operator):
         self.logger.debug(msg)
 
         with cp.cuda.ExternalStream(rf_array.stream):
-            freqs, ts, Zxx = cpss.stft(
-                rf_data,
-                fs=rf_metadata.sample_rate_numerator
-                / rf_metadata.sample_rate_denominator,
-                window=self.window,
-                nperseg=self.nperseg,
-                noverlap=self.noverlap,
-                nfft=self.nfft,
-                detrend=self.detrend,
-                return_onesided=False,
-                boundary=None,
-                padded=True,
-                axis=0,
-                scaling="spectrum",
-            )
-            # reduce over time axis
-            spec = cp.fft.fftshift(
-                self.reduce_op(Zxx.real**2 + Zxx.imag**2, axis=-1), axes=0
-            )
+            for chunk_spectrum_idx, spectrum_chunk in enumerate(
+                cp.split(rf_data, self.num_spectra_per_chunk, axis=0)
+            ):
+                _freqs, sidxs, Zxx = cpss.stft(
+                    spectrum_chunk,
+                    fs=1,
+                    window=self.window,
+                    nperseg=self.nperseg,
+                    noverlap=self.noverlap,
+                    nfft=self.nfft,
+                    detrend=self.detrend,
+                    return_onesided=False,
+                    boundary=None,
+                    padded=True,
+                    axis=0,
+                    scaling="spectrum",
+                )
+                # reduce over time axis
+                spec = cp.fft.fftshift(
+                    self.reduce_op(Zxx.real**2 + Zxx.imag**2, axis=-1), axes=0
+                )
 
-            cp.asnumpy(spec, out=self.spec_host_data[..., chunk_idx], blocking=False)
+                cp.asnumpy(
+                    spec,
+                    out=self.spec_host_data[
+                        ..., chunk_idx * self.num_spectra_per_chunk + chunk_spectrum_idx
+                    ],
+                    blocking=False,
+                )
 
         if chunk_idx == (self.num_chunks_per_output - 1):
             self.write_output()

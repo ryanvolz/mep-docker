@@ -92,11 +92,12 @@ metadata:
 
 spectrogram:
   window: hann
-  nperseg: 1024
+  nperseg: 1000
   noverlap: null
   nfft: null
   detrend: false
   reduce_op: max
+  num_spectra_per_chunk: 4
   num_chunks_per_output: 300
   figsize:
   - 6.4
