@@ -436,7 +436,10 @@ class Spectrogram(holoscan.core.Operator):
         )
 
     def get_chunk_idx(self, sample_idx):
-        return (sample_idx // self.chunk_size) % self.num_chunks_per_output
+        # prior_metadata.sample_idx marks the start of an output cycle
+        return (
+            (sample_idx - self.prior_metadata.sample_idx) // self.chunk_size
+        ) % self.num_chunks_per_output
 
     def write_output(self):
         sample_idx = self.last_seen_sample_idx
@@ -478,6 +481,11 @@ class Spectrogram(holoscan.core.Operator):
             np.timedelta64(int(1000000000 / self.spectra_rate_frac), "ns")
             * spectra_arange
         )
+        output_spec_data = self.spec_host_data[
+            ...,
+            start_chunk_idx * self.num_spectra_per_chunk : (chunk_idx + 1)
+            * self.num_spectra_per_chunk,
+        ]
 
         self.logger.info(f"Outputting spectrogram for time {spec_start_dt}")
 
@@ -485,11 +493,7 @@ class Spectrogram(holoscan.core.Operator):
             [spec_sample_idx],
             [
                 {
-                    "spectrogram": self.spec_host_data[
-                        ...,
-                        start_chunk_idx * self.num_spectra_per_chunk : (chunk_idx + 1)
-                        * self.num_spectra_per_chunk,
-                    ].transpose((1, 0, 2)),
+                    "spectrogram": output_spec_data.transpose((1, 0, 2)),
                     "freq_idx": self.freq_idx + self.prior_metadata.center_freq,
                     "sample_idx": sample_idx_arr,
                     "center_freq": self.prior_metadata.center_freq,
@@ -502,8 +506,8 @@ class Spectrogram(holoscan.core.Operator):
         datestr = spec_start_dt.strftime("%Y-%m-%d")
 
         spec_power_db = 10 * np.log10(
-            self.spec_host_data
-            / np.nanpercentile(self.spec_host_data, 15, axis=(0, 2), keepdims=True)
+            output_spec_data
+            / np.nanpercentile(output_spec_data, 15, axis=(0, 2), keepdims=True)
         )
         delta_t = time_idx[1] - time_idx[0]
         delta_f = self.freq_idx[1] - self.freq_idx[0]
@@ -552,9 +556,6 @@ class Spectrogram(holoscan.core.Operator):
             # new data is not in same output batch as unwritten, so write that first
             self.write_output()
 
-        self.last_seen_sample_idx = rf_metadata.sample_idx
-        chunk_idx = self.get_chunk_idx(self.last_seen_sample_idx)
-
         if self.prior_metadata is None:
             self.set_metadata(rf_metadata)
             self.spectra_rate_frac = fractions.Fraction(
@@ -588,6 +589,9 @@ class Spectrogram(holoscan.core.Operator):
             # metadata changed, write out existing data and start anew
             self.write_output()
             self.set_metadata(rf_metadata)
+
+        self.last_seen_sample_idx = rf_metadata.sample_idx
+        chunk_idx = self.get_chunk_idx(self.last_seen_sample_idx)
 
         msg = (
             f"Processing spectrogram for chunk with sample_idx {rf_metadata.sample_idx}"
