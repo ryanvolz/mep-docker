@@ -383,7 +383,7 @@ class Spectrogram(holoscan.core.Operator):
                 cmap=self.cmap,
                 norm=self.norm,
                 aspect="auto",
-                interpolation="none",
+                interpolation="kaiser",
                 origin="lower",
             )
             cb = fig.colorbar(img, ax=ax, fraction=0.05, pad=0.01)
