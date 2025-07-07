@@ -508,8 +508,8 @@ class Spectrogram(holoscan.core.Operator):
         delta_t = time_idx[1] - time_idx[0]
         delta_f = self.freq_idx[1] - self.freq_idx[0]
         extent = (
-            time_idx[0] - delta_t / 2,
-            time_idx[-1] + delta_t / 2,
+            time_idx[0],
+            time_idx[-1] + delta_t,
             (self.prior_metadata.center_freq + self.freq_idx[0] - delta_f / 2) / 1e6,
             (self.prior_metadata.center_freq + self.freq_idx[-1] + delta_f / 2) / 1e6,
         )
