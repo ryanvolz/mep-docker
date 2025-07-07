@@ -383,7 +383,7 @@ class Spectrogram(holoscan.core.Operator):
                 cmap=self.cmap,
                 norm=self.norm,
                 aspect="auto",
-                interpolation="kaiser",
+                interpolation="none",
                 origin="lower",
             )
             cb = fig.colorbar(img, ax=ax, fraction=0.05, pad=0.01)
@@ -515,7 +515,6 @@ class Spectrogram(holoscan.core.Operator):
             (self.prior_metadata.center_freq + self.freq_idx[0] - delta_f / 2) / 1e6,
             (self.prior_metadata.center_freq + self.freq_idx[-1] + delta_f / 2) / 1e6,
         )
-        self.logger.info(f"{extent=}")
         for sch in range(self.num_subchannels):
             self.imgs[sch].set(
                 data=spec_power_db[:, sch, :],
