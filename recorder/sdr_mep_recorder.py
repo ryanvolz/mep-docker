@@ -384,6 +384,9 @@ class Spectrogram(holoscan.core.Operator):
                 interpolation="none",
                 origin="lower",
             )
+            cb = fig.colorbar(img, ax=ax, fraction=0.05, pad=0.01)
+            cb.set_label("Relative power [dB] (m/s)")
+            ax.set_ylabel("Frequency [MHz]")
             imgs.append(img)
             axs_1d.append(ax)
 
@@ -489,10 +492,18 @@ class Spectrogram(holoscan.core.Operator):
             self.spec_host_data
             / np.nanpercentile(self.spec_host_data, 15, axis=(0, 2), keepdims=True)
         )
+        delta_t = time_idx[1] - time_idx[0]
+        delta_f = self.freq_idx[1] - self.freq_idx[0]
+        extent = (
+            time_idx[0] - delta_t / 2,
+            time_idx[-1] + delta_t / 2,
+            (self.freq_idx[0] - delta_f / 2) / 1e6,
+            (self.freq_idx[-1] + delta_f / 2) / 1e6,
+        )
         for sch in range(self.num_subchannels):
             self.imgs[sch].set(
                 data=spec_power_db[:, sch, :],
-                extent=(0, 1, -1, 1),
+                extent=extent,
             )
         self.fig.canvas.draw()
 
