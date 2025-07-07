@@ -389,6 +389,7 @@ class Spectrogram(holoscan.core.Operator):
             ax.set_ylabel("Frequency [MHz]")
             imgs.append(img)
             axs_1d.append(ax)
+        axs_1d[-1].set_xlabel("Time (UTC)")
         fig.autofmt_xdate()
 
         self.fig = fig
@@ -489,6 +490,10 @@ class Spectrogram(holoscan.core.Operator):
             ],
         )
 
+        timestr = spec_start_dt.strftime("%Y-%m-%dT%H:%M:%S")
+        freqstr = f"{self.prior_metadata.center_freq // 1e6:n}MHz"
+        datestr = spec_start_dt.strftime("%Y-%m-%d")
+
         spec_power_db = 10 * np.log10(
             self.spec_host_data
             / np.nanpercentile(self.spec_host_data, 15, axis=(0, 2), keepdims=True)
@@ -498,21 +503,24 @@ class Spectrogram(holoscan.core.Operator):
         extent = (
             time_idx[0] - delta_t / 2,
             time_idx[-1] + delta_t / 2,
-            (self.freq_idx[0] - delta_f / 2) / 1e6,
-            (self.freq_idx[-1] + delta_f / 2) / 1e6,
+            (self.prior_metadata.center_freq + self.freq_idx[0] - delta_f / 2) / 1e6,
+            (self.prior_metadata.center_freq + self.freq_idx[-1] + delta_f / 2) / 1e6,
         )
         for sch in range(self.num_subchannels):
             self.imgs[sch].set(
                 data=spec_power_db[:, sch, :],
                 extent=extent,
             )
+            if self.num_subchannels > 1:
+                self.axs[sch].set(title=f"Subchannel {sch}")
+        self.fig.suptitle(
+            f"{self.data_outdir.parent.name}/{self.data_outdir.name} @ {freqstr}"
+        )
+        self.axs[-1].set(xlabel=f"Time (UTC), {datestr}")
         self.fig.canvas.draw()
 
-        timestr = spec_start_dt.strftime("%Y-%m-%dT%H:%M:%S")
-        freqstr = f"{self.prior_metadata.center_freq // 1e6:n}MHz"
         fname = f"spec_{timestr}_{freqstr}.png"
-        subdir = spec_start_dt.strftime("%Y-%m-%d")
-        outpath = self.plot_outdir / freqstr / subdir / fname
+        outpath = self.plot_outdir / freqstr / datestr / fname
         outpath.parent.mkdir(parents=True, exist_ok=True)
         self.fig.savefig(outpath)
         latest_spec_path = outpath.parent.parent / "spec_latest.png"
