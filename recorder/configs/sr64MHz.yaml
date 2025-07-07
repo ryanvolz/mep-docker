@@ -76,7 +76,7 @@ spectrogram:
   figsize:
   - 6.4
   - 4.8
-  dpi: 150
+  dpi: 200
   col_wrap: 1
   cmap: viridis
   snr_db_min: -10
