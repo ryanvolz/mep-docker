@@ -390,7 +390,7 @@ class Spectrogram(holoscan.core.Operator):
             cb.set_label("Relative power [dB] (m/s)")
             ax.set_ylabel("Frequency [MHz]")
             if self.num_subchannels > 1:
-                ax.set_title("Subchannel")
+                ax.set_title(f"Subchannel {sch}")
             ax.xaxis.set_major_locator(xlocator)
             ax.xaxis.set_major_formatter(xformatter)
             imgs.append(img)
@@ -522,12 +522,9 @@ class Spectrogram(holoscan.core.Operator):
                 data=spec_power_db[:, sch, :],
                 extent=extent,
             )
-            if self.num_subchannels > 1:
-                self.axs[sch].set(title=f"Subchannel {sch}")
         self.fig.suptitle(
             f"{self.data_outdir.parent.name}/{self.data_outdir.name} @ {freqstr}"
         )
-        self.axs[-1].set(xlabel=f"Time (UTC), {datestr}")
         self.fig.canvas.draw()
 
         fname = f"spec_{timestr}_{freqstr}.png"
