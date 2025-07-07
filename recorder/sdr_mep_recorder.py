@@ -497,7 +497,7 @@ class Spectrogram(holoscan.core.Operator):
         self.fig.canvas.draw()
 
         timestr = spec_start_dt.strftime("%Y-%m-%dT%H:%M:%S")
-        freqstr = f"{self.prior_metadata.center_freq / 1e6:n}MHz"
+        freqstr = f"{self.prior_metadata.center_freq // 1e6:n}MHz"
         fname = f"spec_{timestr}_{freqstr}.png"
         subdir = spec_start_dt.strftime("%Y-%m-%d")
         outpath = self.plot_outdir / freqstr / subdir / fname
