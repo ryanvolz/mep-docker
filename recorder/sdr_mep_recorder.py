@@ -389,6 +389,7 @@ class Spectrogram(holoscan.core.Operator):
             ax.set_ylabel("Frequency [MHz]")
             imgs.append(img)
             axs_1d.append(ax)
+        fig.autofmt_xdate()
 
         self.fig = fig
         self.axs = axs_1d
