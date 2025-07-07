@@ -480,6 +480,7 @@ class Spectrogram(holoscan.core.Operator):
                     ].transpose((1, 0, 2)),
                     "freq_idx": self.freq_idx + self.prior_metadata.center_freq,
                     "sample_idx": sample_idx_arr,
+                    "center_freq": self.prior_metadata.center_freq,
                 }
             ],
         )
@@ -495,9 +496,11 @@ class Spectrogram(holoscan.core.Operator):
             )
         self.fig.canvas.draw()
 
-        fname = f"spec_{spec_start_dt.strftime('%Y-%m-%dT%H:%M:%S')}.png"
+        timestr = spec_start_dt.strftime("%Y-%m-%dT%H:%M:%S")
+        freqstr = f"{self.prior_metadata.center_freq / 1e6:n}MHz"
+        fname = f"spec_{timestr}_{freqstr}.png"
         subdir = spec_start_dt.strftime("%Y-%m-%d")
-        outpath = self.plot_outdir / subdir / fname
+        outpath = self.plot_outdir / freqstr / subdir / fname
         outpath.parent.mkdir(parents=True, exist_ok=True)
         self.fig.savefig(outpath)
         latest_spec_path = outpath.parent.parent / "spec_latest.png"
