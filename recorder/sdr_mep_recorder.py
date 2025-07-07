@@ -398,10 +398,6 @@ class Spectrogram(holoscan.core.Operator):
         axs_1d[-1].set_xlabel("Time (UTC)")
         fig.suptitle("Spectrogram")
         fig.autofmt_xdate(rotation=0, ha="center")
-        # draw and disable the layout engine so that figure layout doesn't change
-        # when components are updated
-        fig.canvas.draw()
-        fig.set_layout_engine("none")
 
         self.fig = fig
         self.axs = axs_1d
@@ -517,6 +513,7 @@ class Spectrogram(holoscan.core.Operator):
             (self.prior_metadata.center_freq + self.freq_idx[0] - delta_f / 2) / 1e6,
             (self.prior_metadata.center_freq + self.freq_idx[-1] + delta_f / 2) / 1e6,
         )
+        self.logger.info(f"{extent=}")
         for sch in range(self.num_subchannels):
             self.imgs[sch].set(
                 data=spec_power_db[:, sch, :],
