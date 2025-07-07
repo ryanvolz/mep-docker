@@ -434,6 +434,10 @@ class Spectrogram(holoscan.core.Operator):
                 rf_metadata.sample_rate_denominator / rf_metadata.sample_rate_numerator,
             )
         )
+        self.spectra_rate_frac = fractions.Fraction(
+            self.prior_metadata.sample_rate_numerator * self.num_spectra_per_chunk,
+            self.prior_metadata.sample_rate_denominator * self.chunk_size,
+        )
 
     def get_chunk_idx(self, sample_idx):
         # prior_metadata.sample_idx marks the start of an output cycle
@@ -457,11 +461,8 @@ class Spectrogram(holoscan.core.Operator):
             )
             self.logger.warning(msg)
         chunk_idx = self.get_chunk_idx(sample_idx)
-        start_chunk_idx = (
-            self.get_chunk_idx(self.last_written_sample_idx) + 1
-        ) % self.num_chunks_per_output
 
-        spec_sample_idx = sample_idx - (chunk_idx - start_chunk_idx) * self.chunk_size
+        spec_sample_idx = sample_idx - chunk_idx * self.chunk_size
         sr_frac = fractions.Fraction(
             self.prior_metadata.sample_rate_numerator,
             self.prior_metadata.sample_rate_denominator,
@@ -470,9 +471,7 @@ class Spectrogram(holoscan.core.Operator):
             spec_sample_idx,
             sr_frac,
         )
-        spectra_arange = np.arange(
-            0, (chunk_idx + 1 - start_chunk_idx) * self.num_spectra_per_chunk
-        )
+        spectra_arange = np.arange(0, (chunk_idx + 1) * self.num_spectra_per_chunk)
         sample_idx_arr = (
             spec_sample_idx
             + self.chunk_size // self.num_spectra_per_chunk * spectra_arange
@@ -483,8 +482,7 @@ class Spectrogram(holoscan.core.Operator):
         )
         output_spec_data = self.spec_host_data[
             ...,
-            start_chunk_idx * self.num_spectra_per_chunk : (chunk_idx + 1)
-            * self.num_spectra_per_chunk,
+            0 : (chunk_idx + 1) * self.num_spectra_per_chunk,
         ]
 
         self.logger.info(f"Outputting spectrogram for time {spec_start_dt}")
@@ -553,15 +551,12 @@ class Spectrogram(holoscan.core.Operator):
         if (rf_metadata.sample_idx - self.last_seen_sample_idx) > (
             self.num_chunks_per_output * self.chunk_size
         ):
+            # triggers on first compute call, but write_output returns immediately
             # new data is not in same output batch as unwritten, so write that first
             self.write_output()
 
         if self.prior_metadata is None:
             self.set_metadata(rf_metadata)
-            self.spectra_rate_frac = fractions.Fraction(
-                self.prior_metadata.sample_rate_numerator * self.num_spectra_per_chunk,
-                self.prior_metadata.sample_rate_denominator * self.chunk_size,
-            )
             self.dmd_writer = drf.DigitalMetadataWriter(
                 metadata_dir=str(self.data_outdir),
                 subdir_cadence_secs=3600,
