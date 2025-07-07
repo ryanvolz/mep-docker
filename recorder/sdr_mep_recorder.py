@@ -370,6 +370,8 @@ class Spectrogram(holoscan.core.Operator):
             dpi=self.dpi,
         )
         self.norm = mpl.colors.Normalize(vmin=self.snr_db_min, vmax=self.snr_db_max)
+        xlocator = mpl.dates.AutoDateLocator(minticks=3, maxticks=7)
+        xformatter = mpl.dates.ConciseDateFormatter(xlocator)
         axs_1d = []
         imgs = []
         for sch in range(self.num_subchannels):
@@ -387,10 +389,19 @@ class Spectrogram(holoscan.core.Operator):
             cb = fig.colorbar(img, ax=ax, fraction=0.05, pad=0.01)
             cb.set_label("Relative power [dB] (m/s)")
             ax.set_ylabel("Frequency [MHz]")
+            if self.num_subchannels > 1:
+                ax.set_title("Subchannel")
+            ax.xaxis.set_major_locator(xlocator)
+            ax.xaxis.set_major_formatter(xformatter)
             imgs.append(img)
             axs_1d.append(ax)
         axs_1d[-1].set_xlabel("Time (UTC)")
-        fig.autofmt_xdate()
+        fig.suptitle("Spectrogram")
+        fig.autofmt_xdate(rotation=0, ha="center")
+        # draw and disable the layout engine so that figure layout doesn't change
+        # when components are updated
+        fig.canvas.draw()
+        fig.set_layout_engine("none")
 
         self.fig = fig
         self.axs = axs_1d
