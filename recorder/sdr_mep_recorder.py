@@ -369,11 +369,13 @@ class Spectrogram(holoscan.core.Operator):
             figsize=self.figsize,
             dpi=self.dpi,
         )
+        fig.get_layout_engine().set(w_pad=1 / 72, h_pad=1 / 72)
         self.norm = mpl.colors.Normalize(vmin=self.snr_db_min, vmax=self.snr_db_max)
         xlocator = mpl.dates.AutoDateLocator(minticks=3, maxticks=7)
         xformatter = mpl.dates.ConciseDateFormatter(xlocator)
         axs_1d = []
         imgs = []
+        ref_lvl_texts = []
         for sch in range(self.num_subchannels):
             row_idx = sch // self.col_wrap
             col_idx = sch % self.col_wrap
@@ -387,21 +389,35 @@ class Spectrogram(holoscan.core.Operator):
                 origin="lower",
             )
             cb = fig.colorbar(img, ax=ax, fraction=0.05, pad=0.01)
-            cb.set_label("Relative power [dB] (m/s)")
+            cb.set_label("Power relative to reference [dB]")
             ax.set_ylabel("Frequency [MHz]")
             if self.num_subchannels > 1:
-                ax.set_title(f"Subchannel {sch}")
+                title = ax.set_title(f"Subchannel {sch}", fontsize="small")
+            else:
+                title = ax.set_title(" ", fontsize="small")
+            ref_lvl_text = ax.text(
+                1.0,
+                title.get_position()[1],
+                "Ref: 1.23e-9 [$V_{ADC}^2$]",
+                fontsize="small",
+                fontstyle="italic",
+                va=title.get_verticalalignment(),
+                ha="right",
+                transform=title.get_transform(),
+            )
             ax.xaxis.set_major_locator(xlocator)
             ax.xaxis.set_major_formatter(xformatter)
             imgs.append(img)
             axs_1d.append(ax)
+            ref_lvl_texts.append(ref_lvl_text)
         axs_1d[-1].set_xlabel("Time (UTC)")
-        fig.suptitle("Spectrogram")
+        self.suptitle = fig.suptitle("Spectrogram", fontsize="medium")
         fig.autofmt_xdate(rotation=0, ha="center")
 
         self.fig = fig
         self.axs = axs_1d
         self.imgs = imgs
+        self.ref_lvl_texts = ref_lvl_texts
 
     def initialize(self):
         self.logger.debug("Initializing spectrogram operator")
@@ -511,10 +527,10 @@ class Spectrogram(holoscan.core.Operator):
         freqstr = f"{self.prior_metadata.center_freq / 1e6:n}MHz"
         datestr = spec_start_dt.strftime("%Y-%m-%d")
 
-        spec_power_db = 10 * np.log10(
-            output_spec_data
-            / np.nanpercentile(output_spec_data, 15, axis=(0, 2), keepdims=True)
+        reference_pwr = np.nanpercentile(
+            output_spec_data, 15, axis=(0, 2), keepdims=True
         )
+        spec_power_db = 10 * np.log10(output_spec_data / reference_pwr)
         delta_t = time_idx[1] - time_idx[0]
         delta_f = self.freq_idx[1] - self.freq_idx[0]
         extent = (
@@ -528,7 +544,10 @@ class Spectrogram(holoscan.core.Operator):
                 data=spec_power_db[:, sch, :],
                 extent=extent,
             )
-        self.fig.suptitle(
+            self.ref_lvl_texts[sch].set_text(
+                f"Ref: {float(reference_pwr[0, sch, 0]):.3n} [$V_{{ADC}}^2$]"
+            )
+        self.suptitle.set_text(
             f"{self.data_outdir.parent.name}/{self.data_outdir.name} @ {freqstr}"
         )
         self.fig.canvas.draw()
