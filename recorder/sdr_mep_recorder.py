@@ -47,6 +47,9 @@ from holohub.rf_array.params import (
 )
 from jsonargparse.typing import NonNegativeInt, PositiveInt
 
+mempool = cp.cuda.MemoryAsyncPool()
+cp.cuda.set_allocator(mempool.malloc)
+
 mpl.use("agg")
 
 logger = logging.getLogger("sdr_mep_recorder.py")
