@@ -13,11 +13,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-FROM ghcr.io/ryanvolz/holohub/rf-array:v1
+FROM ghcr.io/ryanvolz/holohub/rf-array:v1.2
 
 LABEL org.opencontainers.image.description="Holoscan MEP recorder"
-
-WORKDIR /app
 
 #
 # Install any utils needed for execution
@@ -44,8 +42,14 @@ ENV HOLOSCAN_EXECUTOR_LOG_LEVEL=WARN
 ENV HOLOSCAN_LOG_LEVEL=INFO
 ENV HOLOSCAN_LOG_FORMAT=DEFAULT
 
+#
+# Typical use would involve mounting a volume to /app containing
+# these scripts, but copy them into the image anyway to allow
+# use of these static files without the mounting
+#
 COPY --chmod=775 recorder_service.py /app/recorder_service.py
 COPY --chmod=777 sdr_mep_recorder.py /app/sdr_mep_recorder.py
+COPY --chmod=775 spectrogram.py /app/spectrogram.py
 
 ENV HOME=/ramdisk
 WORKDIR /ramdisk

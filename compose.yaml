@@ -92,7 +92,7 @@ services:
       - dev
 
   recorder:
-    image: ghcr.io/ryanvolz/mep-docker/recorder:main
+    image: ghcr.io/ryanvolz/mep-docker/recorder:v1.2
     build: ./recorder
     container_name: recorder
     environment:
@@ -101,7 +101,6 @@ services:
       - HOLOSCAN_EXECUTOR_LOG_LEVEL=WARN
       - HOLOSCAN_LOG_LEVEL=INFO
       - HOLOSCAN_LOG_FORMAT=DEFAULT
-      - CUPY_GPU_MEMORY_LIMIT=268435456
       - PYTHONUNBUFFERED=1
       - RECORDER_DEFAULT_CONFIG=sr1MHz
     network_mode: host
@@ -112,7 +111,7 @@ services:
     user: ${UID}:${GID}
     volumes:
       - /data:/data
-      - ./recorder/configs:/app/configs
+      - ./recorder:/app
 
 volumes:
     mongodb:
