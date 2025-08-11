@@ -22,6 +22,7 @@ LABEL org.opencontainers.image.description="Holoscan MEP recorder"
 #
 ARG DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && apt-get install -y --no-install-recommends \
+    git \
     iftop \
     iproute2 \
     iputils-ping \
@@ -33,7 +34,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 #
 # Install Python dependencies not covered by deb packages
 #
-RUN python3 -m pip install --no-cache-dir aiomqtt anyio digital-rf jsonargparse[ruyaml,signatures] matplotlib exceptiongroup
+RUN python3 -m pip install --no-cache-dir aiomqtt anyio jsonargparse[ruyaml,signatures] matplotlib exceptiongroup
+
+RUN git clone https://github.com/MITHaystack/digital_rf \
+    && cd digital_rf \
+    && python3 -m pip install .
 
 #
 # Set up environment variables
